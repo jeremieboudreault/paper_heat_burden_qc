@@ -321,3 +321,248 @@ an_tbl[, COUNT := NULL]
 # Note : 'an_tbl' contains AN/AF by RSS for total/extreme heat (regional DLNM).
 # an_tbl
 
+
+# ------------------------------------------------------------------------------
+# Step 2.1 : Regional BLUPs from meta-regression -------------------------------
+# ------------------------------------------------------------------------------
+
+
+# Fit meta-regression with stepwise variable selection.
+meta_reg <- fit_stepwise_meta_aic(
+    coef       = coef_matrix, 
+    vcov       = vcov_list,
+    meta_preds = names(meta_data)[-1]
+)
+meta_reg_summ <- summary(meta_reg)
+
+# I2 statistic.
+meta_reg_summ$i2stat[1L]
+
+# P-value for the Cochran Q-test.
+meta_reg_summ$qstat$pvalue[1L]
+
+# Formula of the meta-regression
+meta_reg$formula
+
+# Extract BLUPs.
+blup_meta <- blup(meta_reg, vcov = TRUE) 
+
+# Appending results to the following vectors.
+qmin_rss <- rep(NA, length(rss_sel))
+mmt_rss <- rep(NA, length(rss_sel))
+
+# Extract MMT based on BLUP for each region.
+for (rss in rss_sel){ 
+    
+    # Filter data based on <rss>.
+    data_rss <- data_final[RSS == rss, ]
+    rss_i <- which(rss_sel == rss)
+    
+    # Extract tvar values to extract MMT based on q_mmt.
+    predvar <- quantile(data_rss[[tvar]], probs = q_mmt) 
+    
+    # Argument for the tvar cross-basis.
+    argvar_tvar <- list(
+        x     = predvar,            
+        fun   = "ns", 
+        knots = quantile(data_rss[[tvar]], probs = knots_xvar), 
+        Bound = range(data_rss[[tvar]]) 
+    ) 
+    
+    # Apply one basis to the tvar.
+    bvar <- do.call(onebasis, argvar_tvar) 
+    
+    # Extract quantile of MMT and MMT. 
+    qmin_rss[rss_i] <- q_mmt[which.min((bvar %*% blup_meta[[rss_i]]$blup))]
+    mmt_rss[rss_i] <- quantile(data_rss[[tvar]], qmin_rss[rss_i]) 
+    
+}
+
+# Extract BLUPs of reduced functions at MMT for each RSS.
+red_blups_mmt <- lapply(rss_sel, function(rss) {
+    
+    # Filter data based on <rss>.
+    data_rss <- data_final[RSS == rss, ]
+    rss_i <- which(rss_sel == rss)
+    
+    # Argument for the tvar cross-basis.
+    argvar_tvar <- list(
+        fun   = "ns", 
+        knots = quantile(data_rss[[tvar]], probs = knots_xvar), 
+        Bound = range(data_rss[[tvar]])
+    ) 
+    
+    # Extract coef and vcov from the BLUPs of meta-regression.
+    coef <- blup_meta[[rss_i]]$blup
+    vcov <- blup_meta[[rss_i]]$vcov
+    
+    # Extract MMT.
+    mmt <- mmt_rss[rss_i]
+    
+    # Centered basis functions.
+    bvar <- do.call(onebasis, c(list(x = data_rss[[tvar]]), argvar_tvar))
+    cenvec <- do.call(onebasis, c(list(x = mmt), argvar_tvar))
+    bvarcen <- scale(bvar, center = cenvec, scale = F)
+    
+    # Predict function values.
+    red_blup <- crosspred(bvarcen, coef = coef, vcov = vcov, cen = mmt)
+    
+})
+
+# Set names.
+names(red_blups_mmt) <- rss_sel
+
+# Note : 'red_blups_mmt' contains the BLUPs estimates for each RSS at MMT.
+# For example :
+# plot(red_blups_mmt[[1L]], xlab = tvar, ylab = "RR")
+
+
+# ------------------------------------------------------------------------------
+# Step 2.2 : Burden quantification with reduced regional BLUPs -----------------
+# ------------------------------------------------------------------------------
+
+
+# Get years.
+years <- unique(data_final$YEAR)
+nyears <- length(years)
+
+# Compute simulated AN for each RSS based on BLUPs.
+data_sim <- do.call(rbind, lapply(rss_sel, function(rss) {
+    
+    # Message.
+    if (verbose) message("Computing AN for region ", rss, ".")
+    
+    # Filter data based on <rss>.
+    data_rss <- data_final[RSS == rss, ]
+    rss_i <- which(rss_sel == rss)
+    
+    # Argument for the tvar cross-basis.
+    argvar_tvar <- list(
+        fun   = "ns", 
+        knots = quantile(data_rss[[tvar]], probs = knots_xvar), 
+        Bound = range(data_rss[[tvar]]) 
+    ) 
+    
+    # Extract MMT and threshold for extreme temperature
+    mmt <- mmt_rss[rss_i]
+    ext <- heat_thresh[RSS == rss, get(tvar)]
+    
+    # Extract coef and vcov from the meta-regression.
+    coef <- blup_meta[[rss_i]]$blup
+    vcov <- blup_meta[[rss_i]]$vcov
+    
+    # Centered basis functions.
+    bvar <- do.call(onebasis, c(list(x = data_rss[[tvar]]), argvar_tvar))
+    cenvec <- do.call(onebasis, c(list(x = mmt), argvar_tvar))
+    bvarcen <- scale(bvar, center = cenvec, scale = F)
+    
+    # Indicators for heat and extreme heat days.
+    data_rss[, heat_all     := get(tvar) > mmt]
+    data_rss[, heat_extreme := get(tvar) > max(mmt, ext)]
+    
+    # Compute the contribution of daily values (average value).
+    an_mean <- (1 - exp(-bvarcen %*% coef)) * data_rss[["COUNT"]]
+    
+    # Mean AN values for heat and extreme heat.
+    an_heatall <- sum(an_mean[data_rss$heat_all])/nyears
+    an_heatext <- sum(an_mean[data_rss$heat_extreme])/nyears
+    
+    # Sampling coefficient from BLUP assuming mvnorm.
+    set.seed(2912L)
+    coefsim <- MASS::mvrnorm(nsim, coef, vcov)
+    
+    # Compute simulations.
+    an_sim <- sapply(1:nsim, function(s) {
+        (1 - exp(-bvarcen %*% coefsim[s, ])) * data_rss[["COUNT"]]
+    })
+    
+    # Export data.
+    colnames(an_sim) <- cols_sim
+    data_sim <- cbind(data_rss[, .(RSS, DATE, YEAR, heat_all, heat_extreme)], an_sim)
+    
+    # Return data_sim.
+    return(data_sim)
+    
+}))
+
+# Aggregate simulations by years.
+x_year <- do.call(rbind, lapply(c("heat_all", "heat_extreme"), function(trange) {
+    
+    # Compute mean, lower and higher value.
+    do.call(rbind, lapply(years, function(year) {
+        
+        # Extract values of interest.
+        val <- ul(data_sim[YEAR == year & get(trange) == TRUE, lapply(.SD, sum), .SDcols = cols_sim])
+        
+        # Extract mean values and quantiles.
+        return(data.table(
+            RSS     = 99L,
+            YEAR    = year,
+            TRANGE  = trange,
+            AN      = mean(val),
+            AN_LOW  = quantile(val, probs = 0.025),
+            AN_HIGH = quantile(val, probs = 0.975)
+        ))
+        
+    }))
+    
+}))
+
+# Aggregate simulations by region (RSS).
+x_rss <- do.call(rbind, lapply(c("heat_all", "heat_extreme"), function(trange) {
+    
+    # Compute mean, lower and higher value.
+    do.call(rbind, lapply(rss_sel, function(rss) {
+        
+        # Extract values of interest.
+        val <- ul(data_sim[RSS == rss & get(trange) == TRUE, lapply(.SD, sum), .SDcols = cols_sim])
+        
+        # Extract mean values and quantiles.
+        return(data.table(
+            RSS     = rss,
+            YEAR    = 9999L,
+            TRANGE  = trange,
+            AN      = mean(val)/nyears,
+            AN_LOW  = quantile(val, probs = 0.025)/nyears,
+            AN_HIGH = quantile(val, probs = 0.975)/nyears
+        ))
+        
+    }))
+    
+}))
+
+# Aggregate simulations for the whole province.
+x_qc <- do.call(rbind, lapply(c("heat_all", "heat_extreme"), function(trange) {
+    
+    # Extract values of interest.
+    val <- ul(data_sim[get(trange) == TRUE, lapply(.SD, sum), .SDcols = cols_sim])
+    
+    # Extract mean values and quantiles.
+    return(data.table(
+        RSS     = 99L,
+        YEAR    = 9999L,
+        TRANGE  = trange,
+        AN      = mean(val)/nyears,
+        AN_LOW  = quantile(val, probs = 0.025)/nyears,
+        AN_HIGH = quantile(val, probs = 0.975)/nyears
+    ))
+    
+}))
+
+# Merge all tables.
+an_tbl <- rbind(x_qc, x_rss, x_year)
+
+# Count number per year and region (RSS).
+count_year_rss <- rbind(
+    data_final[, .(COUNT = sum(COUNT)/length(unique(YEAR)), YEAR = 9999L), by = c("RSS")],
+    data_final[, .(COUNT = sum(COUNT), RSS = 99L), by = c("YEAR")],
+    data_final[, .(COUNT = sum(COUNT)/length(unique(YEAR)), YEAR = 9999L, RSS = 99L)]
+)
+
+# Compute AF results.
+an_tbl <- merge(an_tbl, count_year_rss, by = c("RSS", "YEAR"), all.x = TRUE)
+an_tbl[, `:=`(AF = AN / COUNT, AF_LOW = AN_LOW / COUNT, AF_HIGH = AN_HIGH / COUNT)]
+an_tbl[, COUNT := NULL]
+
+# Note : 'an_tbl' contains AN/AF by RSS/Year based on regional BLUPS.
+# an_tbl
