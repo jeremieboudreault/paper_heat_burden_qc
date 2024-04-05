@@ -413,7 +413,6 @@ red_blups_mmt <- lapply(rss_sel, function(rss) {
 names(red_blups_mmt) <- rss_sel
 
 # Note : 'red_blups_mmt' contains the BLUPs estimates for each RSS at MMT.
-# For example :
 # plot(red_blups_mmt[[1L]], xlab = tvar, ylab = "RR")
 
 
@@ -565,4 +564,155 @@ an_tbl[, `:=`(AF = AN / COUNT, AF_LOW = AN_LOW / COUNT, AF_HIGH = AN_HIGH / COUN
 an_tbl[, COUNT := NULL]
 
 # Note : 'an_tbl' contains AN/AF by RSS/Year based on regional BLUPS.
+# an_tbl
+
+
+# ------------------------------------------------------------------------------
+# Step 3.1 : Pooled cumulative functions at MMT --------------------------------
+# ------------------------------------------------------------------------------
+
+
+# Extract full range of temperature.
+range_temp <- range(data_final[[tvar]])
+
+# Extract tested values of temperature within Q25-Q98.
+predvar <- quantile(data_final[[tvar]], probs = q_mmt) 
+argvar_tvar <- list(
+    fun    = "ns", 
+    knots  = quantile(data_final[[tvar]], probs = knots_xvar),
+    Bound  = range_temp
+) 
+bvar <- do.call("onebasis", c(list(x = predvar), argvar_tvar))
+
+# Extract coef and vcov from meta-regression.
+coef_meta <- coef(meta_reg)[1:ncol(coef_matrix)]
+vcov_meta <- vcov(meta_reg)[1:ncol(coef_matrix), 1:ncol(coef_matrix)]
+
+# Get pooled effect (without MMT).
+cpall_prelim <- crosspred(
+    basis      = bvar,
+    coef       = coef_meta,
+    vcov       = vcov_meta,
+    model.link = "log",
+    cen        = mean(mmt_rss),
+    by         = 0.1
+) 
+
+# Get MMT.
+mmt_pooled <- cpall_prelim$predvar[which.min(cpall_prelim$matRRfit)]
+
+# Refit pooled effect at all temperature values.
+predvar <- seq(range_temp[1L], range_temp[2L], by = 0.1)
+argvar_tvar <- list(
+    fun    = "ns", 
+    knots  = quantile(data_final[[tvar]], probs = knots_xvar),
+    Bound  = range_temp
+) 
+bvar <- do.call("onebasis", c(list(x = predvar), argvar_tvar))
+
+# Get pooled effect (with MMT).
+cpall_final <- crosspred(
+    basis      = bvar,
+    coef       = coef(meta_reg)[1:ncol(coef_matrix)],
+    vcov       = vcov(meta_reg)[1:ncol(coef_matrix), 1:ncol(coef_matrix)],
+    model.link = "log",
+    by         = 0.1,
+    from       = range_temp[1],
+    to         = range_temp[2], 
+    cen        = mmt_pooled
+) 
+
+# Note : 'cpall_final' is the pooled (across Quebec) cumulative function at MMT.
+# plot(cpall_final, xlab = tvar, ylab = "RR")
+
+
+# ------------------------------------------------------------------------------
+# Step 3.2 : Heat burden quantification from pooled effect ---------------------
+# ------------------------------------------------------------------------------
+
+
+# Centered basis functions.
+bvar <- do.call(onebasis, c(list(x = data_final[[tvar]]), argvar_tvar))
+cenvec <- do.call(onebasis, c(list(x = mmt_pooled), argvar_tvar))
+bvarcen <- scale(bvar, center = cenvec, scale = F)
+
+# Indicators for heat.
+data_final[, heat_all := get(tvar) > mmt_pooled]
+
+# Indicator for extreme heat.
+data_final <- merge(data_final, heat_thresh[, .(RSS, TRESH = get(tvar))], by = "RSS", all.x = TRUE)
+data_final[, heat_extreme := get(tvar) > max(mmt_pooled, TRESH)]
+
+# Compute the contribution of daily values (average value).
+an_mean <- (1 - exp(-bvarcen %*% coef_meta)) * data_final[["COUNT"]]
+
+# Mean AN values for heat and extreme heat.
+an_heatall <- sum(an_mean[data_final$heat_all])/nyears
+an_heatext <- sum(an_mean[data_final$heat_extreme])/nyears
+
+# Sampling coefficient from BLUP assuming mvnorm.
+set.seed(2912L)
+coefsim <- MASS::mvrnorm(nsim, coef_meta, vcov_meta)
+
+# Compute simulations.
+an_sim <- sapply(1:nsim, function(s) {
+    (1 - exp(-bvarcen %*% coefsim[s, ])) * data_final[["COUNT"]]
+})
+
+# Final dataset.
+colnames(an_sim) <- paste0("SIM", 1:nsim)
+data_sim <- cbind(data_final[, .(RSS, DATE, YEAR, heat_all, heat_extreme)], an_sim)
+
+# Aggregate simulations by year.
+x_year <- do.call(rbind, lapply(c("heat_all", "heat_extreme"), function(trange) {
+    
+    # Compute mean, lower and higher value.
+    do.call(rbind, lapply(unique(data_final$YEAR), function(year) {
+        
+        # Extract values of interest.
+        val <- ul(data_sim[YEAR == year & get(trange) == TRUE, lapply(.SD, sum), .SDcols = cols_sim])
+        
+        # Extract mean values and quantiles.
+        return(data.table(
+            YEAR    = year,
+            TRANGE  = trange,
+            AN      = mean(val),
+            AN_LOW  = quantile(val, probs = 0.025),
+            AN_HIGH = quantile(val, probs = 0.975)
+        ))
+        
+    }))
+    
+}))
+
+# Aggregate simulations for all years.
+x_qc <- do.call(rbind, lapply(c("heat_all", "heat_extreme"), function(trange) {
+    
+    # Extract values of interest.
+    val <- ul(data_sim[get(trange) == TRUE, lapply(.SD, sum), .SDcols = cols_sim])
+    
+    # Extract mean values and quantiles.
+    return(data.table(
+        YEAR    = 9999L,
+        TRANGE  = trange,
+        AN      = mean(val)/nyears,
+        AN_LOW  = quantile(val, probs = 0.025)/nyears,
+        AN_HIGH = quantile(val, probs = 0.975)/nyears
+    ))
+    
+}))
+
+# Merge both table.
+an_tbl <- rbind(x_year, x_qc)
+
+# Count number per year.
+count_peryear <- data_final[, .(COUNT = sum(COUNT)), by = "YEAR"]
+count_peryear <- rbind(count_peryear, data.table(YEAR = 9999L, COUNT = sum(count_peryear$COUNT)/nyears))
+
+# Compute AF results.
+an_tbl <- merge(an_tbl, count_peryear, by = "YEAR", all.x = TRUE)
+an_tbl[, `:=`(AF = AN / COUNT, AF_LOW = AN_LOW / COUNT, AF_HIGH = AN_HIGH / COUNT)]
+an_tbl[, COUNT := NULL]
+
+# Note : 'an_tbl' is the final results of AN/AF based on pooled estimates.
 # an_tbl
