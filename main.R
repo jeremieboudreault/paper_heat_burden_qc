@@ -83,3 +83,46 @@ cols_sim <- paste0("SIM", 1:nsim)
 verbose <- FALSE
 
 
+# ------------------------------------------------------------------------------
+# Step 0 : Data preparation ----------------------------------------------------
+# ------------------------------------------------------------------------------
+
+
+# Merge data based on selected "hvar".
+merged_data <- merge(
+    x     = health_data[HO == hvar, ], 
+    y     = weather_data, 
+    by    = c("RSS", "DATE"), 
+    all.x = TRUE
+)[order(RSS, DATE), ]
+
+# Extract all RSS to be treated.
+rss_sel <- unique(merged_data$RSS)
+
+# Convert weekday and year variables to factor.
+merged_data[, WEEKDAY_F := factor(WEEKDAY, levels = 1:7)]
+merged_data[, YEAR_F := factor(YEAR)]
+
+# Fix <DOY> for leap years.
+merged_data[YEAR %% 4 == 0L, DOY := DOY - 1]
+
+# Create lagged matrix of tvar and relh.
+tvar_mat_l <- create_lagged_mat(tvar)
+relh_mat_l <- create_lagged_mat("RELHMEAN")
+
+# Create lagged matrix of o3 and pm25 (if needed).
+if (grepl("o3", polctrl)) o3_mat_l <- create_lagged_mat("O3MEAN")
+if (grepl("pm25", polctrl)) pm25_mat_l <- create_lagged_mat("PM25MEAN")
+
+# Create final dataset using selected months only.
+data_final <- merged_data[MONTH %in% months, ]
+set(data_final, j = tvar, value = data_final[[paste0(tvar, "0")]])
+
+# Select meta-predictor based on current HO.
+meta_data <- meta_data[HO == hvar, -c("HO")]
+
+# Check that matrices fits with results data.
+sum(sapply(tvar_mat_l, nrow)) == nrow(data_final)
+sum(sapply(relh_mat_l, nrow)) == nrow(data_final)
+
+
