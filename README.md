@@ -22,7 +22,7 @@ Datasets are located in `data/` folder :
 
 ### Analysis
 
-The analyses are all performed in the `main.R` script. The script is separated in the three main steps :
+The analyses are all performed in the `main.R` script. The script is separated in three main steps :
 
 - **Step 1** : DLNM fitting by region and heat burden computation
 - **Step 2** : BLUP from meta-regression and heat burden computation
