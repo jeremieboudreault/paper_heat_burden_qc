@@ -24,17 +24,12 @@ Datasets are located in `data/` folder :
 
 The analyses are all performed in the `main.R` script. The script is separated in the three main steps :
 
-- **Step 0** : Data preparation
-- **Step 1.1** : DLNM fitting by region
-- **Step 1.2** : Heat burden computation with regional DLNM
-- **Step 2.1** : BLUP from meta-regression
-- **Step 2.2** : Heat burden computation with regional BLUP
-- **Step 3.1** : Pooled effect across the province
-- **Step 3.2** : Heat burden computation with pooled effect
+- **Step 1** : DLNM fitting by region and heat burden computation
+- **Step 2** : BLUP from meta-regression and heat burden computation
+- **Step 3** : Pooled effect across the province  and heat burden computation
 
 Helper functions are located in the `R/` folder.
 
 ---
-
 
 ***Enjoy !***
