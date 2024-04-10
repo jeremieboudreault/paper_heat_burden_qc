@@ -11,10 +11,10 @@ This is a code example for the implementation presented in the paper "*Estimatin
 
 Datasets are located in `data/` folder :
 
-- `health_data_synthetic.csv` : Daily count in each health region (RSS) for each health outcome (HO)*
-- `weather_data.csv` : Daily lagged value of temperature, humidity (and air pollution) in each health region (RSS)
+- `health_data_synthetic.csv` : Daily count* in each health region (RSS) for each health outcome (HO)
+- `weather_data.csv` : Daily lagged values of weather and air pollution in each health region (RSS)
 - `meta_predictors.csv` : Meta-predictors for each health region (RSS) and each health outcome (HO)
-- `heat_thresholds.csv` : Extreme temperature thresholds for the heat burden quantification by health region (RSS)
+- `heat_thresholds.csv` : Extreme temperature thresholds (Q95) by health region (RSS)
 
 *Real health data cannot be shared. So we replaced the count of each health outcomes with simulations from a Poisson distribution with λ=100. Obtained results will not make sence, but at least the user can run the code and understand the data struture.
 
