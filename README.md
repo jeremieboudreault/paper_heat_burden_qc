@@ -16,7 +16,7 @@ Datasets are located in `data/` folder :
 - `meta_predictors.csv` : Meta-predictors for each health region (RSS) and each health outcome (HO)
 - `heat_thresholds.csv` : Extreme temperature thresholds (Q95) by health region (RSS)
 
-*Real health data cannot be shared. So we replaced the count of each health outcomes with simulations from a Poisson distribution with λ=100. Obtained results will not make sence, but at least the user can run the code and understand the data struture.
+*Real health data cannot be shared. So we replaced the count of each health outcomes with simulations from a Poisson distribution with λ=100. Obtained results will not make sense, but at least the user can run the code and understand the data structure.
 
 ---
 
