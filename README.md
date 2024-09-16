@@ -1,7 +1,7 @@
 Estimating the heat-related mortality and morbidity burden in Quebec, Canada
 ================================================================================
 
-This is a code example for the implementation presented in the paper "*Estimating the heat-related mortality and morbidity burden in Quebec, Canada*" to compute the heat burden for multiple health outcomes.
+This is a code example for the implementation presented in the paper "*[Estimating the heat-related mortality and morbidity burden in Quebec, Canada](https://doi.org/10.1016/j.envres.2024.119347)*" to compute the heat burden for multiple health outcomes.
 
 - By [Jérémie Boudreault](https://jeremieboudreault.github.io/), Éric Lavigne, Céline Campagna and Fateh Chebana
 
